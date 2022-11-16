@@ -1,0 +1,13 @@
+{
+  "name": "app_runner_api",
+  "version": "1.0.0",
+  "description": "Rest API for App Runner",
+  "main": "index.js",
+  "scripts": {
+    "start": "ENVIRONMENT=$ENVIRONMENT node index.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "express": "^4.16.4"
+  }
+}
