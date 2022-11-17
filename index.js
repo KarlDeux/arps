@@ -2,8 +2,6 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const AWS = require("aws-sdk");
 
-AWS.config.update({ region: region });
-
 const ddb = new AWS.DynamoDB({ apiVersion: "2012-08-10" });
 const app = express();
 const port = process.env.PORT || 8000;
@@ -13,6 +11,8 @@ const environment = process.env.ENVIRONMENT
   : "not informed";
 const table = process.env.TABLE ? process.env.TABLE : "environment";
 const region = process.env.REGION ? process.env.REGION : "us-east-1";
+
+AWS.config.update({ region: region });
 
 console.log("ENVIRONMENT: ", environment);
 console.log("TABLE: ", table);
