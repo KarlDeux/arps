@@ -7,6 +7,7 @@
     "start": "ENVIRONMENT=$ENVIRONMENT node index.js"
   },
   "dependencies": {
+    "aws-sdk": "^2.1256.0",
     "body-parser": "^1.18.3",
     "express": "^4.16.4"
   }
