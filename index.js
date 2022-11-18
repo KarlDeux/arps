@@ -67,7 +67,7 @@ app.post("/api/data", (req, res) => {
     },
   };
 
-  ddb.update(params, function (err, data) {
+  ddb.updateItem(params, function (err, data) {
     if (err) {
       res.json(err);
     } else {

@@ -1,0 +1,741 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: | 
+  App Runner CloudFormation Stack for Private Ingress and Egress with the following components:
+  API Gateway + VPC Link + NLB + VPC Endpoint + App Runner + VPC Connector + VPC Endpoint + DynamoDB
+Resources:
+  #VPC creation
+  PrivateVPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: "Name"
+          Value: "private-apprunner-vpc"
+
+  #Security group modification
+  AppRunnerServiceSecurityGroupIngressTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: "443"
+      ToPort: "443"
+      CidrIp: 10.0.0.0/16
+      GroupId: !GetAtt PrivateVPC.DefaultSecurityGroup
+
+  AppRunnerServiceSecurityGroupIngressAll:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !GetAtt PrivateVPC.DefaultSecurityGroup
+      GroupId: !GetAtt PrivateVPC.DefaultSecurityGroup
+
+  #Subnets creation
+  PrivateSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref PrivateVPC
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref "AWS::Region"
+      CidrBlock: 10.0.128.0/20
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: "Name"
+          Value: "private-apprunner-subnet-1"
+
+  PrivateSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref PrivateVPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref "AWS::Region"
+      CidrBlock: 10.0.144.0/20
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: "Name"
+          Value: "private-apprunner-subnet-2"
+
+  PrivateSubnet3:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref PrivateVPC
+      AvailabilityZone: !Select
+        - 2
+        - Fn::GetAZs: !Ref "AWS::Region"
+      CidrBlock: 10.0.160.0/20
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: "Name"
+          Value: "private-apprunner-subnet-3"
+
+  #Private endpoint creation
+  AppRunnerPrivateEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: false
+      SecurityGroupIds:
+        - !GetAtt PrivateVPC.DefaultSecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.apprunner.requests"
+      PolicyDocument: |
+        {
+          "Statement": [
+            {
+              "Action": "*", 
+              "Effect": "Allow", 
+              "Principal": "*", 
+              "Resource": "*"
+            }
+          ]
+        }
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
+      VpcEndpointType: Interface
+      VpcId: !Ref PrivateVPC
+
+  #Private route table creation
+  PrivateMainRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref PrivateVPC
+      Tags:
+        - Key: Network
+          Value: Private
+
+  PrivateRouteTable1:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref PrivateVPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "private-apprunner-rtb-private1-${PrivateSubnet1.AvailabilityZone}"
+
+  PrivateRouteTable2:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref PrivateVPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "private-apprunner-rtb-private2-${PrivateSubnet2.AvailabilityZone}"
+
+  PrivateRouteTable3:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref PrivateVPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "private-apprunner-rtb-private3-${PrivateSubnet3.AvailabilityZone}"
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  PrivateSubnet3RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref PrivateRouteTable3
+
+  #VPC Ingress Connection creation
+  AppRunnerService1VpcIngressConnection:
+    Type: AWS::AppRunner::VpcIngressConnection
+    Properties:
+      IngressVpcConfiguration:
+        VpcEndpointId: !Ref AppRunnerPrivateEndpoint
+        VpcId: !Ref PrivateVPC
+      ServiceArn: !GetAtt "AppRunnerService1.ServiceArn"
+      VpcIngressConnectionName: "service-1-private-ingress-connection"
+
+  AppRunnerService2VpcIngressConnection:
+    Type: AWS::AppRunner::VpcIngressConnection
+    Properties:
+      IngressVpcConfiguration:
+        VpcEndpointId: !Ref AppRunnerPrivateEndpoint
+        VpcId: !Ref PrivateVPC
+      ServiceArn: !GetAtt "AppRunnerService2.ServiceArn"
+      VpcIngressConnectionName: "service-2-private-ingress-connection"
+
+  #VPC Egress Connection creation
+  AppRunnerServiceConnector:
+    Type: AWS::AppRunner::VpcConnector
+    Properties:
+      SecurityGroups:
+        - !GetAtt PrivateVPC.DefaultSecurityGroup
+      Subnets:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
+      VpcConnectorName: "vpc-connector-apprunner"
+
+  #App Runner service creation
+  AppRunnerService1:
+    Type: "AWS::AppRunner::Service"
+    Properties:
+      ServiceName: "private-endpoint-1"
+      SourceConfiguration:
+        ImageRepository:
+          ImageIdentifier: "public.ecr.aws/t5g2h6o3/arta:latest"
+          ImageConfiguration:
+            Port: "8000"
+            RuntimeEnvironmentVariables:
+              - Name: "ENVIRONMENT"
+                Value: "1"
+          ImageRepositoryType: "ECR_PUBLIC"
+        AutoDeploymentsEnabled: false
+      InstanceConfiguration:
+        Cpu: "1024"
+        Memory: "2048"
+        InstanceRoleArn: !GetAtt DynamoDBWriteRole.Arn
+      NetworkConfiguration:
+        IngressConfiguration:
+          IsPubliclyAccessible: false
+        EgressConfiguration:
+          EgressType: VPC
+          VpcConnectorArn: !GetAtt AppRunnerServiceConnector.VpcConnectorArn
+      HealthCheckConfiguration:
+        Protocol: "TCP"
+        Path: "/"
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+  AppRunnerService2:
+    Type: "AWS::AppRunner::Service"
+    Properties:
+      ServiceName: "private-endpoint-2"
+      SourceConfiguration:
+        ImageRepository:
+          ImageIdentifier: "public.ecr.aws/t5g2h6o3/arta:latest"
+          ImageConfiguration:
+            Port: "8000"
+            RuntimeEnvironmentVariables:
+              - Name: "ENVIRONMENT"
+                Value: "2"
+          ImageRepositoryType: "ECR_PUBLIC"
+        AutoDeploymentsEnabled: false
+      InstanceConfiguration:
+        Cpu: "1024"
+        Memory: "2048"
+        InstanceRoleArn: !GetAtt DynamoDBWriteRole.Arn
+      NetworkConfiguration:
+        IngressConfiguration:
+          IsPubliclyAccessible: false
+        EgressConfiguration:
+          EgressType: VPC
+          VpcConnectorArn: !GetAtt AppRunnerServiceConnector.VpcConnectorArn
+      HealthCheckConfiguration:
+        Protocol: "TCP"
+        Path: "/"
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+  #API Gateway service creation
+  ApiGatewayRestApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: "apprunner-api"
+      ApiKeySourceType: "HEADER"
+      EndpointConfiguration:
+        Types:
+          - "REGIONAL"
+
+  ApiGatewayResource1:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: "private-endpoint-1"
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+
+  ApiGatewayResource2:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: "private-endpoint-2"
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+
+  ApiGatewayResource3:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: "environment"
+      ParentId: !Ref ApiGatewayResource1
+
+  ApiGatewayResource4:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: "environment"
+      ParentId: !Ref ApiGatewayResource2
+
+  ApiGatewayResource5:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: "data"
+      ParentId: !Ref ApiGatewayResource1
+
+  ApiGatewayResource6:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: "data"
+      ParentId: !Ref ApiGatewayResource2
+
+  ApiGatewayMethod1:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource3
+      HttpMethod: "GET"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      Integration:
+        CacheNamespace: !Ref ApiGatewayResource3
+        ConnectionId: !Ref ApiGatewayVpcLink
+        ConnectionType: "VPC_LINK"
+        IntegrationHttpMethod: "GET"
+        IntegrationResponses:
+          - ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "HTTP_PROXY"
+        Uri: !Sub "https://${AppRunnerService1VpcIngressConnection.DomainName}/api/environment"
+
+  ApiGatewayMethod2:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource4
+      HttpMethod: "GET"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      Integration:
+        CacheNamespace: !Ref ApiGatewayResource4
+        ConnectionId: !Ref ApiGatewayVpcLink
+        ConnectionType: "VPC_LINK"
+        IntegrationHttpMethod: "GET"
+        IntegrationResponses:
+          - ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "HTTP_PROXY"
+        Uri: !Sub "https://${AppRunnerService2VpcIngressConnection.DomainName}/api/environment"
+
+  ApiGatewayMethod3:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource5
+      HttpMethod: "GET"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      Integration:
+        CacheNamespace: !Ref ApiGatewayResource5
+        ConnectionId: !Ref ApiGatewayVpcLink
+        ConnectionType: "VPC_LINK"
+        IntegrationHttpMethod: "GET"
+        IntegrationResponses:
+          - ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "HTTP_PROXY"
+        Uri: !Sub "https://${AppRunnerService1VpcIngressConnection.DomainName}/api/data"
+
+  ApiGatewayMethod4:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource6
+      HttpMethod: "GET"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      Integration:
+        CacheNamespace: !Ref ApiGatewayResource6
+        ConnectionId: !Ref ApiGatewayVpcLink
+        ConnectionType: "VPC_LINK"
+        IntegrationHttpMethod: "GET"
+        IntegrationResponses:
+          - ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "HTTP_PROXY"
+        Uri: !Sub "https://${AppRunnerService2VpcIngressConnection.DomainName}/api/data"
+
+  ApiGatewayMethod5:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource5
+      HttpMethod: "POST"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      Integration:
+        CacheNamespace: !Ref ApiGatewayResource5
+        ConnectionId: !Ref ApiGatewayVpcLink
+        ConnectionType: "VPC_LINK"
+        IntegrationHttpMethod: "POST"
+        IntegrationResponses:
+          - ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "HTTP_PROXY"
+        Uri: !Sub "https://${AppRunnerService1VpcIngressConnection.DomainName}/api/data"
+
+  ApiGatewayMethod6:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource6
+      HttpMethod: "POST"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      Integration:
+        CacheNamespace: !Ref ApiGatewayResource6
+        ConnectionId: !Ref ApiGatewayVpcLink
+        ConnectionType: "VPC_LINK"
+        IntegrationHttpMethod: "POST"
+        IntegrationResponses:
+          - ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "HTTP_PROXY"
+        Uri: !Sub "https://${AppRunnerService1VpcIngressConnection.DomainName}/api/data"
+
+  ApiGatewayVpcLink:
+    Type: "AWS::ApiGateway::VpcLink"
+    Properties:
+      Name: "vpc-link-to-nlb"
+      TargetArns:
+        - !Ref ElasticLoadBalancingV2LoadBalancer
+
+  ApiGatewayStage:
+    Type: "AWS::ApiGateway::Stage"
+    Properties:
+      StageName: "prod"
+      DeploymentId: !Ref ApiGatewayDeployment
+      RestApiId: !Ref ApiGatewayRestApi
+      CacheClusterEnabled: false
+      TracingEnabled: false
+
+  ApiGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - "ApiGatewayMethod1"
+      - "ApiGatewayMethod2"
+      - "ApiGatewayMethod3"
+      - "ApiGatewayMethod4"
+      - "ApiGatewayMethod5"
+      - "ApiGatewayMethod6"
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+
+  #Elastic Load Balancer creation
+  ElasticLoadBalancingV2LoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: "private-apprunner-nlb"
+      Scheme: "internal"
+      Type: "network"
+      Subnets:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
+      IpAddressType: "ipv4"
+      LoadBalancerAttributes:
+        - Key: "deletion_protection.enabled"
+          Value: "false"
+        - Key: "load_balancing.cross_zone.enabled"
+          Value: "false"
+        - Key: "access_logs.s3.enabled"
+          Value: "false"
+
+  ElasticLoadBalancingV2Listener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      LoadBalancerArn: !Ref ElasticLoadBalancingV2LoadBalancer
+      Port: 443
+      Protocol: "TCP"
+      DefaultActions:
+        - TargetGroupArn: !Ref ElasticLoadBalancingV2TargetGroup
+          Type: "forward"
+
+  ElasticLoadBalancingV2TargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      Port: 443
+      Protocol: "TCP"
+      HealthCheckPort: "traffic-port"
+      HealthCheckProtocol: "TCP"
+      HealthCheckTimeoutSeconds: 10
+      UnhealthyThresholdCount: 3
+      TargetType: "ip"
+      HealthyThresholdCount: 3
+      VpcId: !Ref PrivateVPC
+      Name: "private-endpoint-apprunner"
+      HealthCheckEnabled: true
+      TargetGroupAttributes:
+        - Key: "proxy_protocol_v2.enabled"
+          Value: "false"
+        - Key: "preserve_client_ip.enabled"
+          Value: "false"
+        - Key: "stickiness.enabled"
+          Value: "false"
+        - Key: "deregistration_delay.timeout_seconds"
+          Value: "300"
+        - Key: "stickiness.type"
+          Value: "source_ip"
+        - Key: "deregistration_delay.connection_termination.enabled"
+          Value: "false"
+      Targets:
+        - Id: !GetAtt GetPrivateIPs.IP0
+          Port: 443
+        - Id: !GetAtt GetPrivateIPs.IP1
+          Port: 443
+        - Id: !GetAtt GetPrivateIPs.IP2
+          Port: 443
+
+  #Get private IPs for the endpoints
+  GetPrivateIPs:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+      NetworkInterfaceIds: !GetAtt AppRunnerPrivateEndpoint.NetworkInterfaceIds
+
+  #Lambda creation for IP gathering (needed for target group using ENI from App Runner Private Endpoint)
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  LambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:*
+              - logs:*
+              - dynamodb:*
+            Resource: "*"
+      Roles:
+        - !Ref LambdaRole
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: "Delete"
+    Properties:
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import json
+          import boto3
+          def lambda_handler(event, context):
+              print("REQUEST RECEIVED:\n" + json.dumps(event))
+              responseData = {}
+              if event["RequestType"] == "Delete":
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                return
+              if event["RequestType"] == "Create":
+                try:
+                  ec2 = boto3.resource("ec2")
+                  enis = event["ResourceProperties"]["NetworkInterfaceIds"]
+                  for index, eni in enumerate(enis):
+                    network_interface = ec2.NetworkInterface(eni)
+                    responseData["IP" + str(index)] = network_interface.private_ip_address
+                    print(responseData)
+                except Exception as e:
+                  responseData = {"error": str(e)}
+                  cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+                  return
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.7
+      Timeout: 10
+
+  #DynamoDB creation
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "environment"
+      AttributeDefinitions:
+        - AttributeName: "environment"
+          AttributeType: "N"
+        - AttributeName: "createdAt"
+          AttributeType: "S"
+        - AttributeName: "postedAt"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "environment"
+          KeyType: "HASH"
+      GlobalSecondaryIndexes:
+        - IndexName: "environmentAndCreatedAt"
+          KeySchema:
+            - AttributeName: "environment"
+              KeyType: "HASH"
+            - AttributeName: "createdAt"
+              KeyType: "RANGE"
+          Projection:
+            ProjectionType: ALL
+        - IndexName: "environmentAndPostedAt"
+          KeySchema:
+            - AttributeName: "environment"
+              KeyType: "HASH"
+            - AttributeName: "postedAt"
+              KeyType: "RANGE"
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  DynamoDBWriteRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [tasks.apprunner.amazonaws.com]
+            Action: [sts:AssumeRole]
+      Path: /
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: !GetAtt DynamoDBTable.Arn
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:ConditionCheckItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DeleteItem
+
+  DynamoDBPrivateEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+      RouteTableIds:
+        - !Ref PrivateRouteTable1
+        - !Ref PrivateRouteTable2
+        - !Ref PrivateRouteTable3
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: "dynamodb:*"
+            Principal: "*"
+            Resource: "*"
+      VpcId: !Ref PrivateVPC
+
+  #Insert Dynamodb Data
+  InsertDynamoDBData:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt LambdaFunctionDynamo.Arn
+      table: !Ref DynamoDBTable
+
+  LambdaFunctionDynamo:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: "Delete"
+    Properties:
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import json
+          import boto3
+          from datetime import datetime
+
+          def lambda_handler(event, context):
+              print("REQUEST RECEIVED:\n" + json.dumps(event))
+              responseData = {}
+              if event["RequestType"] == "Delete":
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                return
+              if event["RequestType"] == "Create":
+                try:
+                  now = datetime.now()
+                  dynamodb = boto3.resource("dynamodb")
+                  table = dynamodb.Table(event["ResourceProperties"]["table"])
+
+                  with table.batch_writer() as batch:
+                    batch.put_item(
+                      Item={
+                        "environment":1, 
+                        "createdAt":now.strftime("%d/%m/%Y %H:%M:%S")
+                      }
+                    )
+                    batch.put_item(
+                      Item={
+                        "environment":2, 
+                        "createdAt":now.strftime("%d/%m/%Y %H:%M:%S")
+                      }
+                    )
+
+                  print(responseData)
+                except Exception as e:
+                  responseData = {"error": str(e)}
+                  cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+                  return
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.7
+      Timeout: 10
+
+#Output ingress URL for testing purposes
+Outputs:
+  Service1Url:
+    Description: private-endpoint-1-url
+    Value: !Sub https://${AppRunnerService1VpcIngressConnection.DomainName}
+  Service2Url:
+    Description: private-endpoint-2-url
+    Value: !Sub https://${AppRunnerService2VpcIngressConnection.DomainName}
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref DynamoDBTable
