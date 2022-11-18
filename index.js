@@ -70,14 +70,14 @@ app.post("/api/data", (req, res) => {
         S: date,
       },
     },
-    ReturnValues: "UPDATED_NEW",
+    ReturnValues: "NONE",
   };
 
   ddb.updateItem(params, function (err, data) {
     if (err) {
       res.json(err);
     } else {
-      res.json(data.Item);
+      res.json(`Inserted "${date}" at environment ${environment}`);
     }
   });
 });
@@ -86,5 +86,5 @@ app.listen(port, (err) => {
   if (err) {
     console.error("Error:", err);
   }
-  console.info(`listening port ${port}`);
+  console.info(`Listening port ${port}`);
 });
