@@ -70,7 +70,7 @@ app.post("/api/data", (req, res) => {
         S: date,
       },
     },
-    ReturnValues: "ALL_NEW",
+    ReturnValues: "UPDATED_NEW",
   };
 
   ddb.updateItem(params, function (err, data) {
