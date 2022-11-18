@@ -61,17 +61,23 @@ app.post("/api/data", (req, res) => {
     Key: {
       environment: { N: environment },
     },
-    UpdateExpression: "set postedAt = :r",
-    ExpressionAttributeValues: {
-      ":r": date,
+    UpdateExpression: "SET #postedAt = :postedAt",
+    ExpressionAttributeNames: {
+      "#postedAt": "postedAt",
     },
+    ExpressionAttributeValues: {
+      ":postedAt": {
+        S: date,
+      },
+    },
+    ReturnValues: "ALL_NEW",
   };
 
   ddb.updateItem(params, function (err, data) {
     if (err) {
       res.json(err);
     } else {
-      console.log("Success - item added or updated", data);
+      res.json(data.Item);
     }
   });
 });

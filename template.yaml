@@ -426,7 +426,7 @@ Resources:
         PassthroughBehavior: "WHEN_NO_MATCH"
         TimeoutInMillis: 29000
         Type: "HTTP_PROXY"
-        Uri: !Sub "https://${AppRunnerService1VpcIngressConnection.DomainName}/api/data"
+        Uri: !Sub "https://${AppRunnerService2VpcIngressConnection.DomainName}/api/data"
 
   ApiGatewayVpcLink:
     Type: "AWS::ApiGateway::VpcLink"
