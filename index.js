@@ -35,8 +35,8 @@ app.get("/api/environment", (req, res) => {
 });
 
 app.get("/api/data", (req, res) => {
-  console.info("api data route");
-  let params = {
+  console.info("api data GET route");
+  const params = {
     TableName: table,
     Key: {
       environment: { N: environment },
@@ -49,6 +49,29 @@ app.get("/api/data", (req, res) => {
       res.json(err);
     } else {
       res.json(data.Item);
+    }
+  });
+});
+
+app.post("/api/data", (req, res) => {
+  console.info("api data POST route");
+  const date = new Date().toISOString().replace(/T/, " ").replace(/\..+/, "");
+  const params = {
+    TableName: table,
+    Key: {
+      environment: { N: environment },
+    },
+    UpdateExpression: "set postedAt = :r",
+    ExpressionAttributeValues: {
+      ":r": date,
+    },
+  };
+
+  ddb.update(params, function (err, data) {
+    if (err) {
+      res.json(err);
+    } else {
+      console.log("Success - item added or updated", data);
     }
   });
 });
