@@ -373,6 +373,7 @@ export class AppRunnerStack extends imports.cdk.Stack {
           `https://${connector.attrDomainName}/api/data`,
           {
             options,
+            httpMethod: method
           }
         )
       );
